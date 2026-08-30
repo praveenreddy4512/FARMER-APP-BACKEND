@@ -35,31 +35,40 @@ app.get('/health', async (req, res) => {
 // ?state=Uttar Pradesh — filter by state
 app.get('/prices', async (req, res) => {
   try {
-    const { commodity, state, limit = 5000 } = req.query;
+    const { commodity, state } = req.query;
 
-    // Fetch all records ordered by date desc
-    let query = supabase
-      .from('mandi_prices')
-      .select('*')
-      .order('arrival_date', { ascending: false })
-      .order('modal_price', { ascending: false });
-
-    if (commodity) query = query.ilike('commodity', `%${commodity}%`);
-    if (state) query = query.ilike('state', `%${state}%`);
-
-    // Fetch enough to get all commodity+market combos
-    query = query.limit(Math.min(Number(limit), 5000));
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    // Deduplicate: keep only the latest record per commodity+market
+    // Paginate through all records (Supabase caps at 1000 per query)
     const latestMap = {};
-    for (const row of data || []) {
-      const key = `${row.commodity}|${row.market}`;
-      if (!latestMap[key] || row.arrival_date > latestMap[key].arrival_date) {
-        latestMap[key] = row;
+    let offset = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      let query = supabase
+        .from('mandi_prices')
+        .select('*')
+        .order('arrival_date', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (commodity) query = query.ilike('commodity', `%${commodity}%`);
+      if (state) query = query.ilike('state', `%${state}%`);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const rows = data || [];
+      for (const row of rows) {
+        const key = `${row.commodity}|${row.market}`;
+        if (!latestMap[key] || row.arrival_date > latestMap[key].arrival_date) {
+          latestMap[key] = row;
+        }
       }
+
+      hasMore = rows.length === pageSize;
+      offset += pageSize;
+
+      // Safety: don't paginate forever
+      if (offset > 10000) break;
     }
 
     const prices = Object.values(latestMap).sort((a, b) =>
@@ -69,7 +78,7 @@ app.get('/prices', async (req, res) => {
     res.json({
       prices,
       total: prices.length,
-      limit: Number(limit),
+      limit: 10000,
       offset: 0,
     });
   } catch (e) {
