@@ -77,3 +77,4 @@ npm start
 4. **Upserts** into Supabase (no duplicates)
 5. **Deletes** data older than 7 days
 6. Flutter app hits this backend instead of calling data.gov.in directly
+# FARMER-APP-BACKEND
