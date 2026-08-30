@@ -150,6 +150,35 @@ async function fetchApi2() {
     }
   }
 
+  // Specific commodity queries (these are deep in results, won't appear in general pages)
+  const specificCommodities = [
+    'Turmeric', 'Coconut', 'Garlic', 'Ginger', 'Coriander',
+    'Cumin', 'Mustard', 'Fennel', 'Fenugreek', 'Chillies',
+  ];
+
+  for (const commodity of specificCommodities) {
+    const url =
+      `https://api.data.gov.in/resource/${API2_ID}` +
+      `?api-key=${API_KEY}&format=json&limit=200` +
+      `&filters[Commodity]=${commodity}`;
+
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) continue;
+      const body = await resp.json();
+      if (body.error) continue;
+
+      const records = body.records || [];
+      for (const r of records) {
+        addApi2Record(r, all);
+      }
+
+      await sleep(500);
+    } catch (e) {
+      // Skip failed commodity
+    }
+  }
+
   return all;
 }
 

@@ -234,22 +234,27 @@ app.post('/fetch-now', async (req, res) => {
   }
 });
 
-// ─── Cron: every 30 minutes ──────────────────────────────────────
-cron.schedule('*/30 * * * *', () => {
-  console.log('⏰ Cron triggered: fetching prices...');
-  fetchAndStore().catch((e) => console.error('Cron fetch failed:', e));
-});
-
 // ─── Start ────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🚀 FarmVoice Price Server running on port ${PORT}`);
-  console.log(`   Health:  http://localhost:${PORT}/health`);
-  console.log(`   Prices:  http://localhost:${PORT}/prices`);
-  console.log(`   Summary: http://localhost:${PORT}/summary`);
-  console.log(`   Commodities: http://localhost:${PORT}/commodities`);
-  console.log(`   Cron: every 30 minutes\n`);
+// Only run cron + listen when NOT on Vercel (serverless)
+if (!process.env.VERCEL) {
+  cron.schedule('*/30 * * * *', () => {
+    console.log('⏰ Cron triggered: fetching prices...');
+    fetchAndStore().catch((e) => console.error('Cron fetch failed:', e));
+  });
 
-  // Run initial fetch on startup
-  console.log('🔄 Running initial fetch...');
-  fetchAndStore().catch((e) => console.error('Initial fetch failed:', e));
-});
+  app.listen(PORT, () => {
+    console.log(`\n🚀 FarmVoice Price Server running on port ${PORT}`);
+    console.log(`   Health:  http://localhost:${PORT}/health`);
+    console.log(`   Prices:  http://localhost:${PORT}/prices`);
+    console.log(`   Summary: http://localhost:${PORT}/summary`);
+    console.log(`   Commodities: http://localhost:${PORT}/commodities`);
+    console.log(`   Cron: every 30 minutes\n`);
+
+    console.log('🔄 Running initial fetch...');
+    fetchAndStore().catch((e) => console.error('Initial fetch failed:', e));
+  });
+} else {
+  console.log('🚀 Running on Vercel — cron handled by Vercel cron jobs');
+}
+
+module.exports = app;
