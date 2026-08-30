@@ -30,29 +30,47 @@ app.get('/health', async (req, res) => {
 });
 
 // ─── GET /prices ──────────────────────────────────────────────────
+// Returns latest price per commodity per market (deduplicated)
+// ?commodity=turmeric  — filter by crop
+// ?state=Uttar Pradesh — filter by state
 app.get('/prices', async (req, res) => {
   try {
-    const { commodity, state, date, limit = 500, offset = 0 } = req.query;
+    const { commodity, state, limit = 5000 } = req.query;
 
+    // Fetch all records ordered by date desc
     let query = supabase
       .from('mandi_prices')
-      .select('*', { count: 'exact' })
+      .select('*')
       .order('arrival_date', { ascending: false })
-      .order('modal_price', { ascending: false })
-      .range(offset, offset + Number(limit) - 1);
+      .order('modal_price', { ascending: false });
 
     if (commodity) query = query.ilike('commodity', `%${commodity}%`);
     if (state) query = query.ilike('state', `%${state}%`);
-    if (date) query = query.eq('arrival_date', date);
 
-    const { data, error, count } = await query;
+    // Fetch enough to get all commodity+market combos
+    query = query.limit(Math.min(Number(limit), 5000));
+
+    const { data, error } = await query;
     if (error) throw error;
 
+    // Deduplicate: keep only the latest record per commodity+market
+    const latestMap = {};
+    for (const row of data || []) {
+      const key = `${row.commodity}|${row.market}`;
+      if (!latestMap[key] || row.arrival_date > latestMap[key].arrival_date) {
+        latestMap[key] = row;
+      }
+    }
+
+    const prices = Object.values(latestMap).sort((a, b) =>
+      a.commodity.localeCompare(b.commodity) || b.modal_price - a.modal_price
+    );
+
     res.json({
-      prices: data || [],
-      total: count || 0,
+      prices,
+      total: prices.length,
       limit: Number(limit),
-      offset: Number(offset),
+      offset: 0,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
