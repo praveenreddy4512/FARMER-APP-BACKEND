@@ -1,7 +1,7 @@
 /**
  * FarmVoice Price Backend
  * - Express API server
- * - Cron job: fetch every 30 minutes
+ * - Cron job: fetch every 3 hours
  * - Endpoints for Flutter app
  */
 require('dotenv').config();
@@ -10,12 +10,14 @@ const cors = require('cors');
 const cron = require('node-cron');
 const { supabase } = require('./supabase');
 const { fetchAndStore } = require('./fetcher');
+const { createAuthRouter } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use('/auth', createAuthRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
@@ -237,7 +239,7 @@ app.post('/fetch-now', async (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────
 // Only run cron + listen when NOT on Vercel (serverless)
 if (!process.env.VERCEL) {
-  cron.schedule('*/30 * * * *', () => {
+  cron.schedule('0 */3 * * *', () => {
     console.log('⏰ Cron triggered: fetching prices...');
     fetchAndStore().catch((e) => console.error('Cron fetch failed:', e));
   });
@@ -248,7 +250,7 @@ if (!process.env.VERCEL) {
     console.log(`   Prices:  http://localhost:${PORT}/prices`);
     console.log(`   Summary: http://localhost:${PORT}/summary`);
     console.log(`   Commodities: http://localhost:${PORT}/commodities`);
-    console.log(`   Cron: every 30 minutes\n`);
+    console.log(`   Cron: every 3 hours\n`);
 
     console.log('🔄 Running initial fetch...');
     fetchAndStore().catch((e) => console.error('Initial fetch failed:', e));

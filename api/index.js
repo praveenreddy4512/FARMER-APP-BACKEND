@@ -6,11 +6,13 @@ const express = require('express');
 const cors = require('cors');
 const { supabase } = require('../src/supabase');
 const { fetchAndStore } = require('../src/fetcher');
+const { createAuthRouter } = require('../src/auth');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/auth', createAuthRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {

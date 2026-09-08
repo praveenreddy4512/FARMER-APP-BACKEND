@@ -1,18 +1,11 @@
 /**
- * Fetches prices from both data.gov.in APIs and stores in Supabase.
- * Handles upserts (insert or update) and deletes old data.
+ * Fetches prices from the data.gov.in variety-wise API and stores in Supabase.
+ * Each run deletes all existing rows and inserts the fresh batch.
  */
 const { supabase } = require('./supabase');
 
 const API_KEY = process.env.DATA_GOV_API_KEY;
-const API1_ID = '9ef84268-d588-465a-a308-a864a43d0070';
 const API2_ID = '35985678-0d79-46b4-9ed6-6f13308a1d24';
-
-function formatDate(d) {
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${day}/${month}/${d.getFullYear()}`;
-}
 
 function parseDate(str) {
   if (!str) return null;
@@ -30,74 +23,25 @@ function parsePrice(val) {
   return isNaN(n) ? 0 : n;
 }
 
-// ─── API 1: Current Daily Price ───────────────────────────────────
-async function fetchApi1() {
-  const all = [];
-  for (let page = 0; page < 5; page++) {
-    const offset = page * 500;
-    const url =
-      `https://api.data.gov.in/resource/${API1_ID}` +
-      `?api-key=${API_KEY}&format=json&limit=500&offset=${offset}`;
-
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) break;
-      const body = await resp.json();
-      if (body.error) break;
-
-      const records = body.records || [];
-      if (records.length === 0) break;
-
-      for (const r of records) {
-        const commodity = r.commodity || '';
-        if (!commodity) continue;
-
-        const minPrice = parsePrice(r.min_price);
-        const maxPrice = parsePrice(r.max_price);
-        const modalPrice = parsePrice(r.modal_price);
-        if (modalPrice <= 0 && minPrice <= 0 && maxPrice <= 0) continue;
-
-        const arrivalDate = parseDate(r.arrival_date);
-        if (!arrivalDate) continue;
-
-        const effectiveModal = modalPrice > 0 ? modalPrice : (minPrice + maxPrice) / 2;
-
-        all.push({
-          commodity,
-          market: r.market || '',
-          state: r.state || '',
-          district: r.district || '',
-          variety: r.variety || '',
-          min_price: minPrice > 0 ? minPrice : effectiveModal,
-          max_price: maxPrice > 0 ? maxPrice : effectiveModal,
-          modal_price: effectiveModal,
-          arrival_date: arrivalDate,
-          api_source: 'api1',
-        });
-      }
-
-      if (records.length < 500) break;
-      await sleep(400);
-    } catch (e) {
-      console.error(`  API1 page ${page} failed:`, e.message);
-      break;
-    }
-  }
-  return all;
-}
-
 // ─── API 2: Variety-wise Daily Market Prices ──────────────────────
+// The full API 2 dataset has ~81 MILLION records (history back to 2009),
+// so we can't paginate all of it. Instead:
+//   1. Paginate the dataset sorted by Arrival_Date DESC — newest records
+//      first — deep enough to cover every market that reported in the
+//      last several days.
+//   2. Query specific deep commodities explicitly (they're buried past
+//      the recent window), also sorted DESC so we get their most recent
+//      records regardless of when they last updated.
 async function fetchApi2() {
   const all = [];
-  const today = formatDate(new Date());
 
-  // 5 general pages for today
-  for (let page = 0; page < 5; page++) {
+  // General pages: most recent records first (covers ~7 days of data)
+  for (let page = 0; page < 30; page++) {
     const offset = page * 500;
     const url =
       `https://api.data.gov.in/resource/${API2_ID}` +
       `?api-key=${API_KEY}&format=json&limit=500&offset=${offset}` +
-      `&filters[Arrival_Date]=${today}`;
+      `&sort[Arrival_Date]=desc`;
 
     try {
       const resp = await fetch(url);
@@ -120,37 +64,9 @@ async function fetchApi2() {
     }
   }
 
-  // Also fetch yesterday (some markets update with delay)
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = formatDate(yesterday);
-
-  for (let page = 0; page < 3; page++) {
-    const offset = page * 500;
-    const url =
-      `https://api.data.gov.in/resource/${API2_ID}` +
-      `?api-key=${API_KEY}&format=json&limit=500&offset=${offset}` +
-      `&filters[Arrival_Date]=${yesterdayStr}`;
-
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) break;
-      const body = await resp.json();
-      if (body.error) break;
-
-      const records = body.records || [];
-      for (const r of records) {
-        addApi2Record(r, all);
-      }
-
-      if (records.length < 500) break;
-      await sleep(400);
-    } catch (e) {
-      break;
-    }
-  }
-
-  // Specific commodity queries (these are deep in results, won't appear in general pages)
+  // Specific commodity queries (deep in the dataset — won't appear in
+  // the recent window if they haven't updated in a while). Sorted DESC
+  // so the most recent records for each commodity come first.
   const specificCommodities = [
     'Turmeric', 'Coconut', 'Garlic', 'Ginger', 'Coriander',
     'Cumin', 'Mustard', 'Fennel', 'Fenugreek', 'Chillies',
@@ -159,7 +75,8 @@ async function fetchApi2() {
   for (const commodity of specificCommodities) {
     const url =
       `https://api.data.gov.in/resource/${API2_ID}` +
-      `?api-key=${API_KEY}&format=json&limit=200` +
+      `?api-key=${API_KEY}&format=json&limit=500` +
+      `&sort[Arrival_Date]=desc` +
       `&filters[Commodity]=${commodity}`;
 
     try {
@@ -210,14 +127,26 @@ function addApi2Record(r, all) {
   });
 }
 
-// ─── Store in Supabase ────────────────────────────────────────────
+// ─── Store in Supabase (delete old, insert new) ───────────────────
 async function storePrices(prices) {
+  // Delete ALL existing rows first, then insert the fresh batch.
+  const { error: delErr } = await supabase
+    .from('mandi_prices')
+    .delete()
+    .gte('id', 0); // matches every row (ids start at 1)
+
+  if (delErr) {
+    console.error('  ❌ Failed to clear old data:', delErr.message);
+    return { inserted: 0 };
+  }
+  console.log('  🗑️  Cleared existing data');
+
   if (prices.length === 0) {
     console.log('  No prices to store.');
-    return { inserted: 0, updated: 0 };
+    return { inserted: 0 };
   }
 
-  // Upsert in batches of 500
+  // Insert in batches of 500
   let inserted = 0;
   const batchSize = 500;
 
@@ -225,13 +154,10 @@ async function storePrices(prices) {
     const batch = prices.slice(i, i + batchSize);
     const { error } = await supabase
       .from('mandi_prices')
-      .upsert(batch, {
-        onConflict: 'commodity,market,arrival_date',
-        ignoreDuplicates: false,
-      });
+      .insert(batch);
 
     if (error) {
-      console.error(`  Upsert batch ${i} failed:`, error.message);
+      console.error(`  Insert batch ${i} failed:`, error.message);
     } else {
       inserted += batch.length;
     }
@@ -240,57 +166,38 @@ async function storePrices(prices) {
   return { inserted };
 }
 
-// ─── Delete old data (keep last 7 days) ──────────────────────────
-async function deleteOldData() {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 7);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
-
-  const { error, count } = await supabase
-    .from('mandi_prices')
-    .delete()
-    .lt('arrival_date', cutoffStr);
-
-  if (error) {
-    console.error('  Delete old data failed:', error.message);
-  } else {
-    console.log(`  Deleted data older than ${cutoffStr}`);
-  }
-}
-
 // ─── Main fetch function ──────────────────────────────────────────
 async function fetchAndStore() {
   console.log(`\n🕐 [${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}] Starting price fetch...`);
 
-  // Fetch from both APIs sequentially
-  console.log('  📡 Fetching API 1 (Current Daily Price)...');
-  const api1 = await fetchApi1();
-  console.log(`  ✅ API 1: ${api1.length} records`);
-
+  // Fetch from the variety-wise API
   console.log('  📡 Fetching API 2 (Variety-wise)...');
-  const api2 = await fetchApi2();
-  console.log(`  ✅ API 2: ${api2.length} records`);
+  const records = await fetchApi2();
+  console.log(`  ✅ API 2: ${records.length} records`);
 
-  // Merge and dedup
-  const seen = new Set();
-  const all = [];
-  for (const p of [...api1, ...api2]) {
-    const key = `${p.commodity}|${p.market}|${p.arrival_date}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      all.push(p);
+  // Dedup: keep the MOST RECENT record per commodity+market,
+  // so every commodity and every market is present with its latest date.
+  const latestMap = new Map();
+  for (const p of records) {
+    const key = `${p.commodity}|${p.market}`;
+    const existing = latestMap.get(key);
+    if (!existing || p.arrival_date > existing.arrival_date) {
+      latestMap.set(key, p);
     }
   }
-  console.log(`  📦 Merged: ${all.length} unique records`);
+  const all = [...latestMap.values()];
+  console.log(`  📦 Deduped: ${all.length} unique commodity+market records`);
 
-  // Store in Supabase
-  console.log('  💾 Storing in Supabase...');
+  // Store in Supabase (replace all existing data with fresh records).
+  // Guard: if the API returned nothing, abort to avoid wiping the table.
+  if (all.length === 0) {
+    console.log('  ⚠️  No records fetched — skipping replace to keep existing data.');
+    return;
+  }
+
+  console.log('  💾 Replacing data in Supabase...');
   const result = await storePrices(all);
   console.log(`  ✅ Stored: ${result.inserted} records`);
-
-  // Delete old data
-  console.log('  🗑️  Cleaning old data (>7 days)...');
-  await deleteOldData();
 
   console.log('  ✅ Done!\n');
 }
