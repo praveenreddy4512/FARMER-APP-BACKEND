@@ -3,6 +3,7 @@ require('dotenv').config();
 
 // Build the Express app (same as src/index.js but without listen/cron)
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const { supabase } = require('../src/supabase');
 const { fetchAndStore } = require('../src/fetcher');
@@ -12,6 +13,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '../public')));
 app.use('/auth', createAuthRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
