@@ -77,7 +77,7 @@ npm start
 4. **Deletes all existing rows** from `mandi_prices`, then **inserts the fresh batch** (table always mirrors the latest fetch)
 5. Flutter app hits this backend instead of calling data.gov.in directly
 
-> **Note:** Vercel cron jobs on the **Hobby plan do not support a three-hour schedule**. For true every-3-hour runs, use a Vercel plan that supports this frequency, host the Node server yourself (`npm start` uses node-cron), or trigger `/api/cron` from an external scheduler (e.g. cron-job.org, GitHub Actions). The local server schedule is `0 */3 * * *`.
+> **Note:** Vercel cron jobs on the **Hobby plan are limited to once per day**, so the deployed Vercel schedule is `0 0 * * *`. For true every-3-hour runs, use a Vercel plan that supports this frequency, host the Node server yourself (`npm start` uses node-cron), or trigger `/api/cron` from an external scheduler (e.g. cron-job.org, GitHub Actions). The local server schedule remains `0 */3 * * *`.
 
 ## Phone.Email authentication and onboarding
 
