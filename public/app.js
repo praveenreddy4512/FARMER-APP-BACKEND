@@ -50,17 +50,29 @@ function renderCommodities() {
 async function fetchCommodities() {
   fetchButton.disabled = true;
   buttonLabel.textContent = 'Fetching...';
-  setMessage('Contacting the FarmVoice price service...');
+  setMessage('Fetching new prices and replacing the saved mandi data...');
 
   try {
+    const refreshResponse = await fetch('/fetch-now', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    });
+    const refreshPayload = await refreshResponse.json();
+    if (!refreshResponse.ok) {
+      throw new Error(refreshPayload.error || 'The price refresh failed.');
+    }
+
     const response = await fetch('/commodities', { headers: { Accept: 'application/json' } });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'The price service returned an error.');
+    if (!response.ok) throw new Error(payload.error || 'The saved commodity list could not be loaded.');
 
     commodities = Array.isArray(payload.commodities) ? payload.commodities : [];
     commodityCount.textContent = commodities.length.toLocaleString();
     lastUpdated.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessage(`${commodities.length.toLocaleString()} commodities loaded.`);
+    const refreshMessage = refreshPayload.refreshed === false
+      ? 'No new upstream prices were available; existing data was kept.'
+      : `${commodities.length.toLocaleString()} commodities loaded with fresh mandi prices.`;
+    setMessage(refreshMessage);
     renderCommodities();
   } catch (error) {
     setMessage(error.message || 'Unable to fetch commodities.', true);

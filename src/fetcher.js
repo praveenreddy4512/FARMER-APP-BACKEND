@@ -137,13 +137,13 @@ async function storePrices(prices) {
 
   if (delErr) {
     console.error('  ❌ Failed to clear old data:', delErr.message);
-    return { inserted: 0 };
+    return { deleted: false, inserted: 0 };
   }
   console.log('  🗑️  Cleared existing data');
 
   if (prices.length === 0) {
     console.log('  No prices to store.');
-    return { inserted: 0 };
+    return { deleted: true, inserted: 0 };
   }
 
   // Insert in batches of 500
@@ -163,7 +163,7 @@ async function storePrices(prices) {
     }
   }
 
-  return { inserted };
+  return { deleted: true, inserted };
 }
 
 // ─── Main fetch function ──────────────────────────────────────────
@@ -192,7 +192,7 @@ async function fetchAndStore() {
   // Guard: if the API returned nothing, abort to avoid wiping the table.
   if (all.length === 0) {
     console.log('  ⚠️  No records fetched — skipping replace to keep existing data.');
-    return;
+    return { refreshed: false, fetched: 0, deleted: false, inserted: 0 };
   }
 
   console.log('  💾 Replacing data in Supabase...');
@@ -200,6 +200,7 @@ async function fetchAndStore() {
   console.log(`  ✅ Stored: ${result.inserted} records`);
 
   console.log('  ✅ Done!\n');
+  return { refreshed: result.deleted && result.inserted > 0, fetched: all.length, ...result };
 }
 
 function sleep(ms) {

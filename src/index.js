@@ -231,8 +231,8 @@ app.get('/summary', async (req, res) => {
 // Manually trigger a fetch
 app.post('/fetch-now', async (req, res) => {
   try {
-    await fetchAndStore();
-    res.json({ status: 'ok', message: 'Fetch completed' });
+    const result = await fetchAndStore();
+    res.json({ status: 'ok', message: result?.refreshed === false ? 'No new prices were stored' : 'Fetch completed', ...result });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

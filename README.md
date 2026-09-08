@@ -59,7 +59,7 @@ npm start
 | `/commodities` | GET | List all commodities with latest date |
 | `/commodity/:name` | GET | Latest prices for one commodity |
 | `/summary` | GET | One row per commodity with avg/min/max |
-| `/fetch-now` | POST | Manually trigger a fetch |
+| `/fetch-now` | POST | Fetch new prices, delete old rows, and store the fresh batch |
 
 ### Query Parameters for /prices
 

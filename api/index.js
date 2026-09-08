@@ -232,8 +232,8 @@ app.get('/commodity/:name', async (req, res) => {
 // ─── POST /fetch-now ──────────────────────────────────────────────
 app.post('/fetch-now', async (req, res) => {
   try {
-    await fetchAndStore();
-    res.json({ status: 'ok', message: 'Fetch completed' });
+    const result = await fetchAndStore();
+    res.json({ status: 'ok', message: result?.refreshed === false ? 'No new prices were stored' : 'Fetch completed', ...result });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
