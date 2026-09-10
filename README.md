@@ -39,6 +39,8 @@ Edit `.env`:
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your-service-role-key
 DATA_GOV_API_KEY=your-data-gov-key
+GROQ_API_KEY=your-server-only-groq-key
+GROQ_MODEL=llama-3.3-70b-versatile
 PORT=3000
 ```
 
@@ -219,4 +221,24 @@ add the same required variables in Project Settings, deploy using the existing
 `vercel.json`, and keep `/api/cron` unchanged. The commodity price routes remain
 available without authentication; profile routes are the only new protected
 surface in this change.
+
+## Farm diary APIs
+
+Run `migrations/002_farm_diary.sql` after `001_farmer_profiles.sql`. All routes
+below require the Phone.Email bearer token. Create a farm first, then create
+crops using its returned ID.
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| `POST` | `/api/farm` | Create an owned farm |
+| `POST` | `/api/farm/crops` | Create an owned crop |
+| `POST` | `/api/ai/voice-command` | Parse Telugu, Hindi, or English into validated actions; does not save |
+| `POST` | `/api/farm/actions/confirm` | Revalidate ownership and save confirmed actions |
+| `GET` | `/api/farm/diary?farmId=...` | Load today's diary and upcoming events |
+| `GET` | `/api/farm/expenses/summary?farmId=...` | Calculate stored expense totals |
+
+Voice requests require `text` (maximum 4000 characters), `language` (`en`,
+`hi`, or `te`), and `currentDate` (`YYYY-MM-DD`). The AI key stays on the
+server. Financial totals are always calculated from stored expenses, never from
+AI output or client-provided totals.
 # FARMER-APP-BACKEND

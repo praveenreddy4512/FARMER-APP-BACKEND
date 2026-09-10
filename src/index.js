@@ -12,14 +12,16 @@ const cron = require('node-cron');
 const { supabase } = require('./supabase');
 const { fetchAndStore } = require('./fetcher');
 const { createAuthRouter } = require('./auth');
+const { createFarmRouter } = require('./farm');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/auth', createAuthRouter());
+app.use('/api', createFarmRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {

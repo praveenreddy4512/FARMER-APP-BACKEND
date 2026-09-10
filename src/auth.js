@@ -241,6 +241,7 @@ function createAuthRouter() {
 module.exports = {
   createAuthRouter,
   requirePhoneEmailUser,
+  findProfile,
   verifyPhoneEmailAccessToken,
   profilePayload,
   identityFromPhoneEmail,
