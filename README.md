@@ -234,6 +234,7 @@ crops using its returned ID.
 | `POST` | `/api/farm/crops` | Create an owned crop |
 | `POST` | `/api/ai/voice-command` | Parse Telugu, Hindi, or English into validated actions; does not save |
 | `POST` | `/api/farm/actions/confirm` | Revalidate ownership and save confirmed actions |
+| `POST` | `/api/farm/sync` | Save offline Flutter diary records and create a default farm when needed |
 | `GET` | `/api/farm/diary?farmId=...` | Load today's diary and upcoming events |
 | `GET` | `/api/farm/expenses/summary?farmId=...` | Calculate stored expense totals |
 

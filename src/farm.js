@@ -36,6 +36,9 @@ function cleanText(value, max = 500) { return typeof value === 'string' && value
 function amount(value) { const number = Number(value); return Number.isFinite(number) && number > 0 && number <= 100000000 ? number : null; }
 function dateOr(value, fallback) { return validDate(value) ? value : fallback; }
 function addDays(date, days) { const result = new Date(`${date}T00:00:00Z`); result.setUTCDate(result.getUTCDate() + Number(days || 0)); return result.toISOString().slice(0, 10); }
+function isoDate(value, fallback = new Date().toISOString().slice(0, 10)) { return validDate(value?.slice?.(0, 10)) ? value.slice(0, 10) : fallback; }
+function categoryForDatabase(value) { const category = String(value || 'other').trim().toLowerCase(); return category === 'seeds' ? 'seed' : category === 'machinery' || category === 'electricity' ? 'equipment' : CATEGORIES.has(category) ? category : 'other'; }
+function eventTypeForDatabase(value) { const type = String(value || 'general_reminder').trim().toLowerCase(); return type === 'crop update' ? 'crop_update' : type === 'general reminder' ? 'general_reminder' : EVENT_TYPES.has(type) ? type : 'general_reminder'; }
 
 async function profileForRequest(req) {
   const profile = await findProfile(req.authenticatedUser);
@@ -125,13 +128,17 @@ async function saveAction(profile, action, body) {
   const farm = await ownedFarm(profile.id, farmId);
   if (!farm) return { error: ['UNAUTHORIZED', 'Farm ownership could not be verified.'] };
   let table; let values;
-  if (action.type === 'ADD_EXPENSE') { table = 'expenses'; values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop?.id || null, amount: action.amount, currency: action.currency, category: action.category, description: action.description, expense_date: action.date }; }
+  if (action.type === 'ADD_CROP') { if (!action.cropName) return { error: ['VALIDATION_ERROR', 'A crop name is required.'] }; table = 'crops'; values = { farmer_profile_id: profile.id, farm_id: farm.id, name: action.cropName, variety: null }; }
+  else if (action.type === 'ADD_EXPENSE') { table = 'expenses'; values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop?.id || null, amount: action.amount, currency: action.currency, category: action.category, description: action.description, expense_date: action.date }; }
   else if (action.type === 'ADD_CROP_UPDATE') { if (!crop) return { error: ['INVALID_CROP', 'A crop is required for a crop update.'] }; table = 'crop_updates'; values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop.id, condition: action.condition, growth_stage: action.growthStage, pest_observation: action.pestObservation, disease_observation: action.diseaseObservation, notes: action.notes, update_date: action.updateDate }; }
   else if (action.type === 'ADD_CALENDAR_EVENT') { table = 'calendar_events'; values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop?.id || null, event_type: action.eventType, title: action.title, description: action.description, event_date: action.eventDate, reminder_date: action.reminderDate, completed: false }; }
   else if (action.type === 'SET_BUDGET') { table = 'budgets'; values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop?.id || null, amount: action.amount, period: action.period, start_date: action.startDate, end_date: action.endDate }; }
   else return { error: ['UNSUPPORTED_ACTION', `Action ${action.type} is not writable.`] };
   const { data, error } = await supabase.from(table).insert(values).select('*').single();
-  if (error) throw error;
+  if (error) {
+    console.error('Farm diary insert failed:', { table, code: error.code, message: error.message });
+    throw error;
+  }
   return { data };
 }
 
@@ -143,6 +150,59 @@ async function expenseSummary(profileId, farmId, startDate, endDate) {
   if (error) throw error;
   const total = (data || []).reduce((sum, row) => sum + Number(row.amount), 0);
   return { totalSpent: total, count: data?.length || 0, expenses: data || [] };
+}
+
+async function defaultFarm(profile) {
+  const { data: existing, error: lookupError } = await supabase.from('farms').select('*').eq('farmer_profile_id', profile.id).order('created_at').limit(1).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (existing) return existing;
+  const { data, error } = await supabase.from('farms').insert({ farmer_profile_id: profile.id, name: 'My Farm', timezone: 'Asia/Kolkata' }).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function cropForSync(profile, farm, name) {
+  const cropName = cleanText(name, 100);
+  if (!cropName) return null;
+  const { data: existing, error: lookupError } = await supabase.from('crops').select('*').eq('farmer_profile_id', profile.id).eq('farm_id', farm.id).ilike('name', cropName).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (existing) return existing;
+  const { data, error } = await supabase.from('crops').insert({ farmer_profile_id: profile.id, farm_id: farm.id, name: cropName }).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function syncRecord(profile, farm, record) {
+  const crop = await cropForSync(profile, farm, record.crop || record.cropName);
+  const date = isoDate(record.date);
+  if (record.kind === 'crop') return crop ? { kind: record.kind, id: crop.id } : null;
+  if (record.kind === 'expense') {
+    const values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop?.id || null, amount: amount(record.amount), currency: record.currency === 'INR' ? 'INR' : null, category: categoryForDatabase(record.category), description: cleanText(record.description || 'Farm expense', 500), expense_date: date };
+    if (!values.amount || !values.currency) return null;
+    const { data, error } = await supabase.from('expenses').insert(values).select('*').single();
+    if (error) throw error;
+    return data;
+  }
+  if (record.kind === 'crop_update' && crop) {
+    const values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop.id, condition: cleanText(record.condition || record.activity || record.notes || 'Crop update', 500), growth_stage: cleanText(record.growthStage, 100), pest_observation: cleanText(record.pestDisease, 500), disease_observation: null, notes: cleanText(record.notes, 1000), update_date: date };
+    const { data, error } = await supabase.from('crop_updates').insert(values).select('*').single();
+    if (error) throw error;
+    return data;
+  }
+  if (record.kind === 'calendar_event') {
+    const values = { farmer_profile_id: profile.id, farm_id: farm.id, crop_id: crop?.id || null, event_type: eventTypeForDatabase(record.type), title: cleanText(record.title || 'Farm reminder', 200), description: cleanText(record.notes, 500), event_date: date, reminder_date: null, completed: false };
+    const { data, error } = await supabase.from('calendar_events').insert(values).select('*').single();
+    if (error) throw error;
+    return data;
+  }
+  if (record.kind === 'budget') {
+    const budgetAmount = amount(record.totalBudget);
+    if (!budgetAmount) return null;
+    const { data, error } = await supabase.from('budgets').insert({ farmer_profile_id: profile.id, farm_id: farm.id, amount: budgetAmount, period: record.season ? 'season' : 'total', start_date: date, end_date: null }).select('*').single();
+    if (error) throw error;
+    return data;
+  }
+  return null;
 }
 
 function createFarmRouter() {
@@ -174,6 +234,24 @@ function createFarmRouter() {
   router.post('/farm/actions/confirm', async (req, res) => {
     try { const profile = await profileForRequest(req); if (!profile) return errorResponse(res, 404, 'PROFILE_NOT_FOUND', 'Complete the farmer profile first.'); const actions = req.body?.actions; if (!Array.isArray(actions) || !actions.length || actions.length > 50) return errorResponse(res, 400, 'VALIDATION_ERROR', 'actions must contain between 1 and 50 items.'); const results = []; for (const raw of actions) { const action = normalizeAction(raw, req.body.currentDate || new Date().toISOString().slice(0, 10)); if (!action) return errorResponse(res, 400, 'VALIDATION_ERROR', 'Every action must pass validation.'); const result = await saveAction(profile, action, req.body); if (result.error) return errorResponse(res, 403, result.error[0], result.error[1]); results.push(result.data); } return res.status(201).json({ success: true, records: results }); }
     catch (error) { console.error('Action confirmation failed:', error.message); return errorResponse(res, 500, 'DATABASE_ERROR', 'Confirmed farm actions could not be saved.'); }
+  });
+  router.post('/farm/sync', async (req, res) => {
+    try {
+      const profile = await profileForRequest(req);
+      if (!profile) return errorResponse(res, 404, 'PROFILE_NOT_FOUND', 'Complete the farmer profile first.');
+      const records = req.body?.records;
+      if (!Array.isArray(records) || records.length > 100) return errorResponse(res, 400, 'VALIDATION_ERROR', 'records must contain between 1 and 100 items.');
+      const farm = await defaultFarm(profile);
+      const synced = [];
+      for (const record of records) {
+        const result = await syncRecord(profile, farm, record || {});
+        if (result) synced.push(result);
+      }
+      return res.status(201).json({ success: true, farmId: farm.id, records: synced });
+    } catch (error) {
+      console.error('Farm sync failed:', error.message);
+      return errorResponse(res, 500, 'DATABASE_ERROR', 'Farm diary records could not be saved.');
+    }
   });
   router.post('/farm/crops', async (req, res) => { try { const profile = await profileForRequest(req); const farm = await ownedFarm(profile?.id, req.body?.farmId); const name = cleanText(req.body?.name, 100); if (!farm || !name) return errorResponse(res, 400, 'VALIDATION_ERROR', 'A valid owned farm and crop name are required.'); const { data, error } = await supabase.from('crops').insert({ farmer_profile_id: profile.id, farm_id: farm.id, name, variety: cleanText(req.body.variety, 100) }).select('*').single(); if (error) throw error; return res.status(201).json({ success: true, crop: data }); } catch (error) { return errorResponse(res, 500, 'DATABASE_ERROR', 'Crop could not be created.'); } });
   router.get('/farm/diary', async (req, res) => { try { const profile = await profileForRequest(req); const farm = await ownedFarm(profile?.id, req.query.farmId); if (!farm) return errorResponse(res, 403, 'UNAUTHORIZED', 'Farm ownership could not be verified.'); const today = req.query.date || new Date().toISOString().slice(0, 10); const [expenses, updates, events, crops, budgets] = await Promise.all([supabase.from('expenses').select('*').eq('farmer_profile_id', profile.id).eq('farm_id', farm.id).eq('expense_date', today), supabase.from('crop_updates').select('*').eq('farmer_profile_id', profile.id).eq('farm_id', farm.id).eq('update_date', today), supabase.from('calendar_events').select('*').eq('farmer_profile_id', profile.id).eq('farm_id', farm.id).gte('event_date', today).order('event_date').limit(50), supabase.from('crops').select('*').eq('farmer_profile_id', profile.id).eq('farm_id', farm.id).eq('active', true), supabase.from('budgets').select('*').eq('farmer_profile_id', profile.id).eq('farm_id', farm.id)]); if ([expenses, updates, events, crops, budgets].some((result) => result.error)) throw new Error('Dashboard query failed'); const totalSpent = (expenses.data || []).reduce((sum, row) => sum + Number(row.amount), 0); const totalBudget = (budgets.data || []).reduce((sum, row) => sum + Number(row.amount), 0); return res.json({ success: true, expenses: expenses.data || [], todayTotalSpending: totalSpent, cropUpdates: updates.data || [], upcomingCalendarEvents: events.data || [], activeCrops: crops.data || [], budget: { totalBudget, totalSpent, remainingBudget: totalBudget - totalSpent, spentPercentage: totalBudget ? (totalSpent / totalBudget) * 100 : 0, isExceeded: totalSpent > totalBudget } }); } catch (error) { return errorResponse(res, 500, 'DATABASE_ERROR', 'Farm diary could not be loaded.'); } });
