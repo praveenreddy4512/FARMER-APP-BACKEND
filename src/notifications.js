@@ -335,6 +335,48 @@ function createAdminAuthRouter() {
 function createAdminNotificationRouter() {
   const router = express.Router();
   router.use(requireAdmin);
+  router.get('/audience', async (req, res) => {
+    try {
+      const [{ data: profiles, error: profileError }, { data: devices, error: deviceError }] = await Promise.all([
+        supabase
+          .from('farmer_profiles')
+          .select('id, full_name, phone_number, country_code, preferred_language')
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('notification_devices')
+          .select('farmer_profile_id, platform, last_seen_at')
+          .eq('enabled', true),
+      ]);
+      if (profileError) throw profileError;
+      if (deviceError) throw deviceError;
+      const deviceMap = new Map();
+      for (const device of devices || []) {
+        const current = deviceMap.get(device.farmer_profile_id) || { count: 0, platforms: new Set(), lastSeenAt: null };
+        current.count += 1;
+        if (device.platform) current.platforms.add(device.platform);
+        if (!current.lastSeenAt || device.last_seen_at > current.lastSeenAt) current.lastSeenAt = device.last_seen_at;
+        deviceMap.set(device.farmer_profile_id, current);
+      }
+      return res.json({
+        success: true,
+        farmers: (profiles || []).map((profile) => {
+          const device = deviceMap.get(profile.id) || { count: 0, platforms: new Set(), lastSeenAt: null };
+          return {
+            id: profile.id,
+            name: profile.full_name || 'Unnamed farmer',
+            phone: `${profile.country_code || ''} ${profile.phone_number || ''}`.trim(),
+            language: profile.preferred_language || 'en',
+            deviceCount: device.count,
+            platforms: [...device.platforms],
+            lastSeenAt: device.lastSeenAt,
+          };
+        }),
+      });
+    } catch (error) {
+      console.error('Admin audience lookup failed:', error.message);
+      return errorResponse(res, 500, 'AUDIENCE_LOOKUP_FAILED', 'Farmers could not be loaded.');
+    }
+  });
   router.post('/send', async (req, res) => {
     try {
       const title = text(req.body?.title, 120);

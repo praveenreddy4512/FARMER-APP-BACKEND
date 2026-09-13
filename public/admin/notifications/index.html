@@ -26,6 +26,7 @@
     .success { background: #e6f5e8; color: #1b653d; }
     .error { background: #fde9e5; color: #9b2e22; }
     .hidden { display: none; }
+    .audience-meta { color: var(--muted); font-size: 13px; font-weight: 400; }
     @media (max-width: 560px) { main { padding: 20px 0; } .panel { padding: 24px 20px; } .topline { display: block; } .signout { margin-top: 12px; } }
   </style>
 </head>
@@ -44,7 +45,7 @@
       </div>
       <div id="sendView" class="hidden">
         <div class="topline">
-          <div><h1>Send a notification</h1><p class="intro">Broadcast to all registered devices or target farmer profile IDs.</p></div>
+          <div><h1>Send a notification</h1><p class="intro">Choose a farmer from the database or broadcast to all registered devices.</p></div>
           <button class="signout" id="signoutButton" type="button">Sign out</button>
         </div>
         <form id="sendForm">
@@ -53,7 +54,10 @@
           </label>
           <label>Title <input id="title" maxlength="120" required></label>
           <label>Message <textarea id="body" maxlength="1000" required></textarea></label>
-          <label>Target profile IDs <span>(optional, comma or newline separated)</span><textarea id="profileIds" rows="3"></textarea></label>
+          <label>Send to
+            <select id="audience"><option value="">All registered devices</option></select>
+            <span class="audience-meta" id="audienceStatus">Loading farmers...</span>
+          </label>
           <button id="sendButton">Send notification</button>
         </form>
       </div>
@@ -75,6 +79,25 @@
     function showSendView() {
       loginView.classList.add('hidden');
       sendView.classList.remove('hidden');
+      loadAudience();
+    }
+
+    async function loadAudience() {
+      const select = $('audience');
+      try {
+        const response = await fetch('/api/admin/notifications/audience', { headers: { Authorization: `Bearer ${sessionStorage.getItem(sessionKey)}` } });
+        const result = await response.json();
+        if (response.status === 401) { showLoginView(); throw new Error('Your session expired. Please sign in again.'); }
+        if (!response.ok) throw new Error(result.error?.message || 'Farmers could not be loaded');
+        for (const farmer of result.farmers || []) {
+          const option = document.createElement('option');
+          option.value = farmer.id;
+          option.textContent = `${farmer.name} — ${farmer.phone || 'no phone'} (${farmer.deviceCount} device${farmer.deviceCount === 1 ? '' : 's'})`;
+          option.disabled = farmer.deviceCount === 0;
+          select.appendChild(option);
+        }
+        $('audienceStatus').textContent = `${result.farmers?.length || 0} farmers loaded from the database.`;
+      } catch (error) { $('audienceStatus').textContent = error.message; }
     }
 
     function showLoginView() {
@@ -102,9 +125,9 @@
       event.preventDefault();
       $('sendButton').disabled = true;
       notice.className = 'notice hidden';
-      const profileIds = $('profileIds').value.split(/[,\n]/).map((id) => id.trim()).filter(Boolean);
+      const selectedProfileId = $('audience').value;
       try {
-        const response = await fetch('/api/admin/notifications/send', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem(sessionKey)}` }, body: JSON.stringify({ title: $('title').value, body: $('body').value, type: $('type').value, ...(profileIds.length ? { profileIds } : {}) }) });
+        const response = await fetch('/api/admin/notifications/send', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem(sessionKey)}` }, body: JSON.stringify({ title: $('title').value, body: $('body').value, type: $('type').value, ...(selectedProfileId ? { profileIds: [selectedProfileId] } : {}) }) });
         const result = await response.json();
         if (response.status === 401) { showLoginView(); throw new Error('Your session expired. Please sign in again.'); }
         if (!response.ok) throw new Error(result.error?.message || 'Send failed');
