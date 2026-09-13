@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const { getApps, initializeApp, cert } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
@@ -12,6 +13,7 @@ const PREFERENCE_KEYS = {
   daily: 'daily',
   general: 'enabled',
 };
+const ADMIN_SESSION_DURATION_SECONDS = 8 * 60 * 60;
 
 function errorResponse(res, status, code, message) {
   return res.status(status).json({ success: false, error: { code, message } });
@@ -25,6 +27,39 @@ function text(value, max) {
 
 function notificationType(value) {
   return NOTIFICATION_TYPES.has(value) ? value : 'general';
+}
+
+function adminToken(username) {
+  const payload = Buffer.from(JSON.stringify({
+    username,
+    expiresAt: Math.floor(Date.now() / 1000) + ADMIN_SESSION_DURATION_SECONDS,
+  })).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '')
+    .update(payload)
+    .digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function validAdminToken(token) {
+  if (!token || !process.env.ADMIN_SESSION_SECRET) return false;
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return false;
+  const expected = crypto
+    .createHmac('sha256', process.env.ADMIN_SESSION_SECRET)
+    .update(payload)
+    .digest('base64url');
+  const providedBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) return false;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return claims.username === process.env.ADMIN_USERNAME &&
+      Number(claims.expiresAt) > Math.floor(Date.now() / 1000);
+  } catch (_) {
+    return false;
+  }
 }
 
 function preferencesForDevice(device) {
@@ -260,9 +295,41 @@ function createNotificationRouter() {
 }
 
 function requireAdmin(req, res, next) {
-  const expected = process.env.ADMIN_NOTIFICATION_KEY;
-  if (!expected || req.get('x-admin-key') !== expected) return errorResponse(res, 401, 'ADMIN_AUTHENTICATION_REQUIRED', 'A valid admin key is required.');
+  const match = (req.get('authorization') || '').match(/^Bearer\s+(\S+)$/i);
+  if (!validAdminToken(match?.[1])) return errorResponse(res, 401, 'ADMIN_AUTHENTICATION_REQUIRED', 'A valid admin login is required.');
   return next();
+}
+
+function createAdminAuthRouter() {
+  const router = express.Router();
+  const attempts = new Map();
+  router.post('/login', (req, res) => {
+    const key = req.ip || 'unknown';
+    const now = Date.now();
+    const current = attempts.get(key);
+    if (current && now - current.startedAt < 60_000 && current.count >= 5) {
+      return errorResponse(res, 429, 'RATE_LIMITED', 'Too many login attempts. Try again later.');
+    }
+    const entry = current && now - current.startedAt < 60_000
+      ? current
+      : { startedAt: now, count: 0 };
+    entry.count += 1;
+    attempts.set(key, entry);
+
+    const username = text(req.body?.username, 100);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD ||
+        username !== process.env.ADMIN_USERNAME || password !== process.env.ADMIN_PASSWORD) {
+      return errorResponse(res, 401, 'INVALID_CREDENTIALS', 'Invalid admin username or password.');
+    }
+    attempts.delete(key);
+    return res.json({
+      success: true,
+      token: adminToken(username),
+      expiresIn: ADMIN_SESSION_DURATION_SECONDS,
+    });
+  });
+  return router;
 }
 
 function createAdminNotificationRouter() {
@@ -322,6 +389,7 @@ async function runAutomaticNotifications({ pricesRefreshed = false } = {}) {
 
 module.exports = {
   createNotificationRouter,
+  createAdminAuthRouter,
   createAdminNotificationRouter,
   runAutomaticNotifications,
   sendToAudience,

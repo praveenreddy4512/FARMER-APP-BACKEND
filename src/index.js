@@ -15,6 +15,7 @@ const { createAuthRouter } = require('./auth');
 const { createFarmRouter } = require('./farm');
 const {
   createNotificationRouter,
+  createAdminAuthRouter,
   createAdminNotificationRouter,
   runAutomaticNotifications,
 } = require('./notifications');
@@ -26,6 +27,7 @@ app.use(cors());
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/auth', createAuthRouter());
+app.use('/api/admin', createAdminAuthRouter());
 app.use('/api/admin/notifications', createAdminNotificationRouter());
 app.use('/api/notifications', createNotificationRouter());
 app.use('/api', createFarmRouter());

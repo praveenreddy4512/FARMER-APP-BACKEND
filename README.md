@@ -42,7 +42,9 @@ DATA_GOV_API_KEY=your-data-gov-key
 GROQ_API_KEY=your-server-only-groq-key
 GROQ_MODEL=llama-3.3-70b-versatile
 PORT=3000
-ADMIN_NOTIFICATION_KEY=replace-with-a-long-random-admin-secret
+ADMIN_USERNAME=choose-an-admin-username
+ADMIN_PASSWORD=choose-a-long-admin-password
+ADMIN_SESSION_SECRET=replace-with-a-long-random-session-secret
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account", "project_id":"..."}
 ```
 
@@ -213,13 +215,18 @@ read with `POST /api/notifications/:id/read`.
 
 Configure `FIREBASE_SERVICE_ACCOUNT_JSON` in the backend/Vercel environment
 using a Firebase service-account JSON value. Never commit it or put it in the
-Flutter app. Configure `ADMIN_NOTIFICATION_KEY` as a separate server secret.
+Flutter app. Configure the admin username, password, and session secret as
+server-only environment variables.
+
+Admin login is available at `POST /api/admin/login` with `{ username, password }`.
+It returns an 8-hour signed session token. Send that token as
+`Authorization: Bearer <token>` when calling the notification endpoint.
 
 The protected admin endpoint is:
 
 ```text
 POST /api/admin/notifications/send
-x-admin-key: <ADMIN_NOTIFICATION_KEY>
+Authorization: Bearer <admin-session-token>
 ```
 
 The operations page in the website is available at `/admin/notifications` and
