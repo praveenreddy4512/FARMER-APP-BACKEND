@@ -229,10 +229,10 @@ POST /api/admin/notifications/send
 Authorization: Bearer <admin-session-token>
 ```
 
-The operations page in the website is available at `/admin/notifications` and
-uses `VITE_BACKEND_URL` when provided. Leave target profile IDs empty for a
-broadcast; provide IDs to target selected farmers. Notification delivery and
-failure records are stored in `notification_deliveries`.
+The backend serves the operations page at `/admin/notifications`. Leave target
+profile IDs empty for a broadcast; provide IDs to target selected farmers.
+Notification delivery and failure records are stored in
+`notification_deliveries`.
 
 The scheduled job sends daily briefings, weather risk alerts when a registered
 device has location permission, updated-price alerts after a successful price
