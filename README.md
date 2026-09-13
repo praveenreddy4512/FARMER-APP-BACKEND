@@ -42,6 +42,8 @@ DATA_GOV_API_KEY=your-data-gov-key
 GROQ_API_KEY=your-server-only-groq-key
 GROQ_MODEL=llama-3.3-70b-versatile
 PORT=3000
+ADMIN_NOTIFICATION_KEY=replace-with-a-long-random-admin-secret
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account", "project_id":"..."}
 ```
 
 ### 3. Install and run
@@ -200,6 +202,34 @@ backend currently validates the access token through Phone.Email's documented
 JWT. If Phone.Email enables a JWT verification endpoint/API-key flow for the
 account, configure it according to their current account documentation before
 switching the verifier.
+
+### Notifications
+
+Run `migrations/003_notifications.sql` in Supabase before using notifications.
+The Flutter app registers each FCM token at `POST /api/notifications/devices`,
+including the farmer's notification preferences, language, selected crops, and
+location. It reads in-app messages from `GET /api/notifications` and marks them
+read with `POST /api/notifications/:id/read`.
+
+Configure `FIREBASE_SERVICE_ACCOUNT_JSON` in the backend/Vercel environment
+using a Firebase service-account JSON value. Never commit it or put it in the
+Flutter app. Configure `ADMIN_NOTIFICATION_KEY` as a separate server secret.
+
+The protected admin endpoint is:
+
+```text
+POST /api/admin/notifications/send
+x-admin-key: <ADMIN_NOTIFICATION_KEY>
+```
+
+The operations page in the website is available at `/admin/notifications` and
+uses `VITE_BACKEND_URL` when provided. Leave target profile IDs empty for a
+broadcast; provide IDs to target selected farmers. Notification delivery and
+failure records are stored in `notification_deliveries`.
+
+The scheduled job sends daily briefings, weather risk alerts when a registered
+device has location permission, updated-price alerts after a successful price
+refresh, and reminders for due farm calendar events.
 
 ### Testing and deployment
 

@@ -9,6 +9,11 @@ const { supabase } = require('../src/supabase');
 const { fetchAndStore } = require('../src/fetcher');
 const { createAuthRouter } = require('../src/auth');
 const { createFarmRouter } = require('../src/farm');
+const {
+  createNotificationRouter,
+  createAdminNotificationRouter,
+  runAutomaticNotifications,
+} = require('../src/notifications');
 
 const app = express();
 
@@ -17,6 +22,8 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/auth', createAuthRouter());
 app.use('/api', createFarmRouter());
+app.use('/api/notifications', createNotificationRouter());
+app.use('/api/admin/notifications', createAdminNotificationRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
@@ -245,8 +252,11 @@ app.post('/fetch-now', async (req, res) => {
 app.get('/api/cron', async (req, res) => {
   try {
     console.log('⏰ Vercel cron triggered: fetching prices...');
-    await fetchAndStore();
-    res.json({ status: 'ok', message: 'Cron fetch completed' });
+    const result = await fetchAndStore();
+    const notifications = await runAutomaticNotifications({
+      pricesRefreshed: result?.refreshed === true,
+    });
+    res.json({ status: 'ok', message: 'Cron fetch and notifications completed', notifications: notifications.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

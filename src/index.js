@@ -13,6 +13,11 @@ const { supabase } = require('./supabase');
 const { fetchAndStore } = require('./fetcher');
 const { createAuthRouter } = require('./auth');
 const { createFarmRouter } = require('./farm');
+const {
+  createNotificationRouter,
+  createAdminNotificationRouter,
+  runAutomaticNotifications,
+} = require('./notifications');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +27,8 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/auth', createAuthRouter());
 app.use('/api', createFarmRouter());
+app.use('/api/notifications', createNotificationRouter());
+app.use('/api/admin/notifications', createAdminNotificationRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
@@ -245,7 +252,9 @@ app.post('/fetch-now', async (req, res) => {
 if (!process.env.VERCEL) {
   cron.schedule('0 */3 * * *', () => {
     console.log('⏰ Cron triggered: fetching prices...');
-    fetchAndStore().catch((e) => console.error('Cron fetch failed:', e));
+    fetchAndStore()
+      .then((result) => runAutomaticNotifications({ pricesRefreshed: result?.refreshed === true }))
+      .catch((e) => console.error('Cron fetch/notification failed:', e));
   });
 
   app.listen(PORT, () => {
