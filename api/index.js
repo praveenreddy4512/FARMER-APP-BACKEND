@@ -21,9 +21,9 @@ app.use(cors());
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 app.use('/auth', createAuthRouter());
-app.use('/api', createFarmRouter());
-app.use('/api/notifications', createNotificationRouter());
 app.use('/api/admin/notifications', createAdminNotificationRouter());
+app.use('/api/notifications', createNotificationRouter());
+app.use('/api', createFarmRouter());
 
 // ─── Health check ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
