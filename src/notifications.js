@@ -177,7 +177,13 @@ async function deliverNotification(notification, devices) {
         body: notification.body,
         ...(notification.data || {}),
       }).map(([key, value]) => [key, String(value)])),
-      android: { priority: 'high', notification: { channelId: 'farmvoice_channel' } },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'farmvoice_channel',
+          icon: 'ic_farmvoice_notification',
+        },
+      },
     };
     const response = await messaging.sendEachForMulticast(message);
     for (let index = 0; index < chunk.length; index += 1) {
