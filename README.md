@@ -46,6 +46,8 @@ ADMIN_USERNAME=choose-an-admin-username
 ADMIN_PASSWORD=choose-a-long-admin-password
 ADMIN_SESSION_SECRET=replace-with-a-long-random-session-secret
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account", "project_id":"..."}
+# Alternative for Vercel values containing quotes/newlines:
+FIREBASE_SERVICE_ACCOUNT_JSON_BASE64=base64-encoded-service-account-json
 ```
 
 ### 3. Install and run

@@ -75,9 +75,32 @@ function isAllowed(device, type) {
 }
 
 function firebaseMessaging() {
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) return null;
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64;
+  if (!raw && !encoded) return null;
   if (!getApps().length) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    let serviceAccount;
+    try {
+      if (encoded) {
+        serviceAccount = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+      } else {
+        let value = raw.trim();
+        if ((value.startsWith("'") && value.endsWith("'")) ||
+            (value.startsWith('"') && value.endsWith('"'))) {
+          value = value.slice(1, -1);
+        }
+        serviceAccount = JSON.parse(value);
+        if (typeof serviceAccount === 'string') {
+          serviceAccount = JSON.parse(serviceAccount);
+        }
+      }
+      if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) {
+        throw new Error('service account is missing project_id, client_email, or private_key');
+      }
+    } catch (error) {
+      console.error('Firebase Admin credentials are invalid:', error.message);
+      throw new Error('Firebase Admin credentials are invalid. Configure the complete service-account JSON or base64 JSON.');
+    }
     initializeApp({ credential: cert(serviceAccount) });
   }
   return getMessaging();
